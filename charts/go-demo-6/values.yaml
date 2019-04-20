@@ -1,5 +1,5 @@
 # Default values for Go projects.
-i# This is a YAML-formatted file.
+# This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 replicaCount: 1
 image:
@@ -42,4 +42,3 @@ terminationGracePeriodSeconds: 10
 go-demo-6-db:
   replicaSet:
     enabled: true
-
