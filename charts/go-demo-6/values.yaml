@@ -1,38 +1,75 @@
-# Default values for Go projects.
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
-replicaCount: 1
-image:
-  repository: draft
-  tag: dev
-  pullPolicy: IfNotPresent
-service:
-  name: go-demo-6
-  type: ClusterIP
-  externalPort: 80
-  internalPort: 8080
-  annotations:
-    fabric8.io/expose: "true"
-    fabric8.io/ingress.annotations: "kubernetes.io/ingress.class: nginx"
-resources:
-  limits:
-    cpu: 100m
-    memory: 256Mi
-  requests:
-    cpu: 80m
-    memory: 128Mi
-probePath: /demo/hello?health=true
-livenessProbe:
-  initialDelaySeconds: 60
-  periodSeconds: 10
-  successThreshold: 1
-  timeoutSeconds: 1
-readinessProbe:
-  periodSeconds: 10
-  successThreshold: 1
-  timeoutSeconds: 1
-terminationGracePeriodSeconds: 10
-go-demo-6-db:
-  replicaSet:
-    enabled: true
+SHELL := /bin/bash
+GO := GO15VENDOREXPERIMENT=1 go
+NAME := go-demo-6
+OS := $(shell uname)
+MAIN_GO := main.go
+ROOT_PACKAGE := $(GIT_PROVIDER)/vfarcic/$(NAME)
+GO_VERSION := $(shell $(GO) version | sed -e 's/^[^0-9.]*\([0-9.]*\).*/\1/')
+PACKAGE_DIRS := $(shell $(GO) list ./... | grep -v /vendor/)
+PKGS := $(shell go list ./... | grep -v /vendor | grep -v generated)
+BUILDFLAGS := ''
+CGO_ENABLED = 0
+VENDOR_DIR=vendor
+
+all: build
+
+check: fmt build test
+
+build:
+	CGO_ENABLED=$(CGO_ENABLED) $(GO) build -ldflags $(BUILDFLAGS) -o bin/$(NAME) $(MAIN_GO)
+
+test: 
+	CGO_ENABLED=$(CGO_ENABLED) $(GO) test $(PACKAGE_DIRS) -test.v
+
+full: $(PKGS)
+
+install:
+	GOBIN=${GOPATH}/bin $(GO) install -ldflags $(BUILDFLAGS) $(MAIN_GO)
+
+fmt:
+	@FORMATTED=`$(GO) fmt $(PACKAGE_DIRS)`
+	@([[ ! -z "$(FORMATTED)" ]] && printf "Fixed unformatted files:\n$(FORMATTED)") || true
+
+clean:
+	rm -rf build release
+
+linux:
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=amd64 $(GO) build -ldflags $(BUILDFLAGS) -o bin/$(NAME) $(MAIN_GO)
+
+.PHONY: release clean
+
+FGT := $(GOPATH)/bin/fgt
+$(FGT):
+	go get github.com/GeertJohan/fgt
+
+GOLINT := $(GOPATH)/bin/golint
+$(GOLINT):
+	go get github.com/golang/lint/golint
+
+$(PKGS): $(GOLINT) $(FGT)
+	@echo "LINTING"
+	@$(FGT) $(GOLINT) $(GOPATH)/src/$@/*.go
+	@echo "VETTING"
+	@go vet -v $@
+	@echo "TESTING"
+	@go test -v $@
+
+.PHONY: lint
+lint: vendor | $(PKGS) $(GOLINT) # ❷
+	@cd $(BASE) && ret=0 && for pkg in $(PKGS); do \
+	    test -z "$$($(GOLINT) $$pkg | tee /dev/stderr)" || ret=1 ; \
+	done ; exit $$ret
+
+
+functest: 
+	CGO_ENABLED=$(CGO_ENABLED) $(GO) \
+	test -test.v --run FunctionalTest \
+	--cover
+
+
+integtest: 
+	DURATION=1 \
+	CGO_ENABLED=$(CGO_ENABLED) $(GO) \
+	test -test.v --run ProductionTest \
+	--cover
 
